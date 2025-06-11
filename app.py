@@ -100,14 +100,12 @@ observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدي
 
 
 
- st.success("✅ تم تحميل الملفات بنجاح")
-
-    if st.button("🔄 تنفيذ التعيين"):
+st.success("✅ تم تحميل الملفات بنجاح")
+if st.button("🔄 تنفيذ التعيين"):
         result_df = assign_observers(matches, observers)
         st.success("✅ تم تنفيذ التعيين")
         st.dataframe(result_df)
-
-        output = result_df.to_excel(index=False)
+        output = result_df.to_excel(index=False, engine="openpyxl")
         st.download_button("📥 تحميل النتائج", data=output, file_name="assigned_matches.xlsx")
 else:
     st.warning("يرجى رفع كلا الملفين للاستمرار.")
