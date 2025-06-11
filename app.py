@@ -86,14 +86,18 @@ if matches_file and observers_file:
     obs_raw = pd.read_excel(observers_file)
 
     # تجهيز اسم المراقب الكامل + المدينة
-   obs_raw["الاسم الكامل"] = (
+# مستوى البلوك الرئيسي (0 مسافات إضافية)
+obs_raw["الاسم الكامل"] = (
+    # مستوى البلوك داخل القوس (4 مسافات إضافية)
     obs_raw["First name"].fillna("") + " " +
     obs_raw["2nd name"].fillna("") + " " +
     obs_raw["Family name"].fillna("")
 ).str.strip()
 
+# هذه الأسطر كلها في نفس مستوى البلوك الرئيسي
 obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
 observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+
 
 
     st.success("✅ تم تحميل الملفات بنجاح")
