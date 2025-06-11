@@ -3,118 +3,132 @@ import pandas as pd
 import datetime
 import requests
 
-st.set_page_config(
-    page_title="Match Commissioners Assigner",
-    page_icon="⚽",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# إعدادات الصفحة
+st.set_page_config(page_title="Match Commissioners Assigner", layout="wide")
 
-# --- الإعدادات الجانبية ---
+# الشريط الجانبي: الإعدادات
 st.sidebar.title("⚙️ الإعدادات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
-minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
-use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب المسافة", value=False)
-max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
-google_api_key = st.sidebar.text_input("Google API Key", type="password")
+minimize_repeats = st.sidebar.checkbox("تقليل تكرار تعيين المراقب", value=True)
+use_distance = st.sidebar.checkbox("استخدام المسافة بين المدن (Google Maps)", value=False)
+max_distance = st.sidebar.number_input("أقصى مسافة (كم)", value=200)
+google_api_key = st.sidebar.text_input("Google Maps API Key:")
 
-# --- رفع الملفات ---
-st.title("📄 Match Commissioners Assigner")
-st.markdown("**ارفع ملفات المباريات والمراقبين بالترتيب المطلوب (Excel):**")
+# واجهة التحميل
+st.title("📄 تعيين مراقبين للمباريات")
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-def calculate_distance(city1, city2, api_key):
-    url = f"https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {"origins": city1, "destinations": city2, "key": api_key, "language": "ar"}
+# دالة لحساب المسافة باستخدام Google Maps
+def calculate_distance(origin, destination):
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    params = {
+        "origins": origin,
+        "destinations": destination,
+        "key": google_api_key,
+        "language": "ar",
+        "units": "metric"
+    }
     response = requests.get(url, params=params)
     data = response.json()
     try:
-        distance = data["rows"][0]["elements"][0]["distance"]["value"] / 1000  # بالكيلومتر
+        distance = data["rows"][0]["elements"][0]["distance"]["value"] / 1000  # كم
         return distance
     except:
         return float("inf")
 
+# دالة التعيين
 def assign_observers(matches, observers):
     assignments = []
+    observer_usage = {obs["رقم المراقب"]: 0 for _, obs in observers.iterrows()}
     assigned_days = {}
-    observer_usage = {row["رقم المراقب"]: 0 for _, row in observers.iterrows()}
-    last_assignment = {row["رقم المراقب"]: datetime.date(2000,1,1) for _, row in observers.iterrows()}
 
     for _, match in matches.iterrows():
         match_number = match.get("رقم المباراة")
-        if pd.isna(match_number):
-            assignments.append("❌ غير مخصص")
+        match_date_raw = str(match.get("التاريخ")).strip()
+        if pd.isna(match_number) or not match_date_raw:
+            assignments.append("—")
             continue
 
-        # معالجة التاريخ مع اليوم
         try:
-            match_date_str = str(match.get("التاريخ")).split("-")[-3:]
-            match_date = pd.to_datetime("-".join(match_date_str), dayfirst=True).date()
+            match_date_str = match_date_raw.split(" - ")[-1]
+            match_date = pd.to_datetime(match_date_str).date()
         except:
-            assignments.append("⚠️ تاريخ غير صالح")
+            assignments.append("—")
             continue
 
-        stadium = match.get("الملعب")
-        city = match.get("المدينة")
+        match_city = str(match.get("المدينة")).strip()
+        match_stadium = str(match.get("الملعب")).strip()
 
         candidates = observers.copy()
-        candidates["usage"] = candidates["رقم المراقب"].map(observer_usage)
+        candidates["المرات"] = candidates["رقم المراقب"].map(observer_usage)
+        candidates = candidates.sort_values(by="المرات")
 
-        # استبعاد من عُيّن قبل أقل من X أيام
-        if min_days_between > 0:
-            candidates = candidates[candidates["رقم المراقب"].apply(lambda x: (match_date - last_assignment[x]).days >= min_days_between)]
+        def is_eligible(obs):
+            obs_id = obs["رقم المراقب"]
+            obs_city = obs["مدينة المراقب"].strip()
 
-        # منع التعيين المكرر في نفس اليوم باستثناء نفس الملعب
-        if not allow_same_day:
-            candidates = candidates[candidates["رقم المراقب"].apply(lambda x: assigned_days.get(x) != match_date or stadium == "")]
+            if minimize_repeats and assignments.count(obs_id) > 0:
+                return False
+            if obs_id in assigned_days:
+                for day, stadium in assigned_days[obs_id]:
+                    delta = abs((match_date - day).days)
+                    if delta < min_days_between:
+                        return False
+                    if not allow_same_day and (match_date == day and match_stadium != stadium):
+                        return False
+            if use_distance:
+                distance = calculate_distance(obs_city, match_city)
+                if distance > max_distance:
+                    return False
+            return True
 
-        # مسافة Google
-        if use_distance and google_api_key:
-            candidates["distance"] = candidates["مدينة المراقب"].apply(lambda c: calculate_distance(c, city, google_api_key))
-            candidates = candidates[candidates["distance"] <= max_distance]
+        chosen = None
+        for _, obs in candidates.iterrows():
+            if is_eligible(obs):
+                chosen = obs
+                break
 
-        # اختيار أقل استخدام
-        if minimize_repeats:
-            candidates = candidates.sort_values(by="usage")
-
-        if not candidates.empty:
-            chosen = candidates.iloc[0]
-            observer_id = chosen["رقم المراقب"]
-            assignments.append(f'{observer_id} - {chosen["الاسم الكامل"]}')
-            observer_usage[observer_id] += 1
-            last_assignment[observer_id] = match_date
-            assigned_days[observer_id] = match_date
+        if chosen is not None:
+            obs_id = chosen["رقم المراقب"]
+            assignments.append(obs_id)
+            observer_usage[obs_id] += 1
+            assigned_days.setdefault(obs_id, []).append((match_date, match_stadium))
         else:
-            assignments.append("❌ لا يوجد متاح")
+            assignments.append("—")
 
     matches["المراقب"] = assignments
     return matches
 
-# --- المعالجة ---
+# تنفيذ التعيين
 if matches_file and observers_file:
-    matches = pd.read_excel(matches_file)
-    obs_raw = pd.read_excel(observers_file)
+    try:
+        matches = pd.read_excel(matches_file)
+        obs_raw = pd.read_excel(observers_file)
 
-    # معالجة ملف المراقبين
-    obs_raw["الاسم الكامل"] = (
-        obs_raw["First name"].fillna("") + " " +
-        obs_raw["2nd name"].fillna("") + " " +
-        obs_raw["Family name"].fillna("")
-    ).str.strip()
+        # تجهيز عمود الاسم الكامل
+        obs_raw["الاسم الكامل"] = (
+            obs_raw["First name"].fillna("") + " " +
+            obs_raw["2nd name"].fillna("") + " " +
+            obs_raw["Family name"].fillna("")
+        ).str.strip()
 
-    obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
-    observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+        # تجهيز المدينة
+        obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
 
-    st.success("✅ تم تحميل الملفات بنجاح")
+        # تجهيز المراقبين النهائي
+        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
-    if st.button("🔄 تنفيذ التعيين"):
-        result_df = assign_observers(matches, observers)
-        st.success("✅ تم تنفيذ التعيين")
-        st.dataframe(result_df)
+        st.success("✅ تم تحميل الملفات بنجاح")
 
-        output = result_df.to_excel(index=False)
-        st.download_button("📥 تحميل الملف", data=output, file_name="assigned_matches.xlsx")
+        if st.button("🔄 تنفيذ التعيين"):
+            result_df = assign_observers(matches, observers)
+            st.success("✅ تم التعيين بنجاح")
+            st.dataframe(result_df)
+            st.download_button("⬇️ تحميل الملف", data=result_df.to_excel(index=False), file_name="assigned_matches.xlsx")
+
+    except Exception as e:
+        st.error(f"حدث خطأ أثناء المعالجة: {e}")
 else:
-    st.warning("⚠️ يرجى رفع كلا الملفين للمتابعة.")
+    st.warning("📂 يرجى رفع ملفي المباريات والمراقبين.")
