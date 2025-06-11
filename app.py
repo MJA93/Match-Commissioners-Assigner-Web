@@ -65,7 +65,8 @@ def assign_observers(matches, observers):
     for _, match in matches.iterrows():
         match_id = match.get("رقم المباراة")
         match_date_str = str(match.get("التاريخ"))
-        match_date = pd.to_datetime(match_date_str.split("-")[-1].strip()).date()
+        match_date_clean = match_date_str.split("-")[-1].strip().split()[0]
+        match_date = pd.to_datetime(match_date_clean).date()
         match_city = str(match.get("المدينة")).strip()
         match_venue = str(match.get("الملعب")).strip()
 
@@ -77,14 +78,17 @@ def assign_observers(matches, observers):
 
         if not allow_same_day:
             candidates = candidates[~candidates['رقم المراقب'].isin([
-                rid for rid, day in assigned_days.items() if day == match_date and match_venue == match.get("الملعب")
+                rid for rid, day in assigned_days.items()
+                if day == match_date and match_venue == match.get("الملعب")
             ])]
 
         if minimize_repeats:
             candidates = candidates.sort_values(by=candidates['رقم المراقب'].map(observer_usage))
 
         if use_distance:
-            candidates["distance"] = candidates["مدينة المراقب"].apply(lambda x: calculate_distance(x, match_city))
+            candidates["distance"] = candidates["مدينة المراقب"].apply(
+                lambda x: calculate_distance(x, match_city)
+            )
             candidates = candidates[candidates["distance"] <= max_distance]
             candidates = candidates.sort_values(by="distance")
 
@@ -114,6 +118,7 @@ if matches_file and observers_file:
         obs_raw["2nd name"].fillna("") + " " +
         obs_raw["Family name"].fillna("")
     ).str.strip()
+
     obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
     observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
