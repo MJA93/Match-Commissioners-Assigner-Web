@@ -95,7 +95,9 @@ obs_raw["الاسم الكامل"] = (
 ).str.strip()
 
 # هذه الأسطر كلها في نفس مستوى البلوك الرئيسي
-obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
+# البحث عن عمود يحتوي على 'مدين' في اسمه ومن ثم تنظيفه من الفراغات الزائدة
+city_col = next(col for col in obs_raw.columns if "مدين" in col)
+obs_raw["مدينة المراقب"] = obs_raw[city_col].astype(str).str.strip()
 observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
 
