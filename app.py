@@ -100,18 +100,27 @@ def assign_observers(matches, observers):
 # ---------------------------
 def read_matches_file(file):
     df_raw = pd.read_excel(file, header=None)
-    match_header_index = None
-    for i in range(len(df_raw)):
-        if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
-            match_header_index = i
-            break
-    if match_header_index is None:
-        return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
+    header_row = None
 
-    df_matches = pd.read_excel(file, header=match_header_index)
+    for i in range(min(10, len(df_raw))):
+        row = df_raw.iloc[i].astype(str).str.strip()
+        if (
+            row.str.contains("رقم المباراة").any() and
+            row.str.contains("التاريخ").any() and
+            row.str.contains("الملعب").any() and
+            row.str.contains("المدينة").any()
+        ):
+            header_row = i
+            break
+
+    if header_row is None:
+        return None, "⚠️ لم يتم العثور على صف يحتوي على رؤوس الأعمدة (رقم المباراة، التاريخ، المدينة، الملعب)"
+
+    df_matches = pd.read_excel(file, header=header_row)
     df_matches.columns = df_matches.columns.str.strip()
     df_matches = df_matches.dropna(subset=["رقم المباراة", "التاريخ", "الملعب", "المدينة"])
     return df_matches, None
+
 
 # ---------------------------
 # Main Execution
