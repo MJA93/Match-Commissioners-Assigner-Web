@@ -30,7 +30,6 @@ observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"
 # ---------------------------
 # Helper: Google Maps API
 # ---------------------------
-
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
@@ -45,14 +44,13 @@ def calculate_distance(city1, city2):
     try:
         resp = requests.get(url, params=params).json()
         meters = resp["rows"][0]["elements"][0]["distance"]["value"]
-        return meters / 1000  # كم
+        return meters / 1000
     except Exception:
-        return 1e9  # قيمة كبيرة تعني مسافة غير مقبولة
+        return 1e9
 
 # ---------------------------
 # Core Assigner
 # ---------------------------
-
 def assign_observers(matches, observers):
     assignments = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
@@ -64,23 +62,21 @@ def assign_observers(matches, observers):
             assignments.append("—")
             continue
 
-        # تاريخ (مع تنظيف اليوم)
-        raw_date = str(row["التاريخ"]).split("-")[-1].strip().split()[0]
+        raw_date = str(row["التاريخ"]).split()[0]  # إزالة اليوم من بداية التاريخ
         match_date = pd.to_datetime(raw_date, errors="coerce").date()
         city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
 
-        # مرشحين أوليين
+        # المرشحين
         cand = observers.copy()
 
-        # استبعاد حسب نفس اليوم / الملعب
         def valid(o):
             rid = o["رقم المراقب"]
             if rid in last_dates:
                 d = last_dates[rid]
                 if (match_date - d).days < min_days_between:
                     return False
-                if not allow_same_day and d == match_date:
+                if not allow_same_day and d == match_date and o["مدينة المراقب"] == city:
                     return False
             if use_distance:
                 dist = calculate_distance(city, o["مدينة المراقب"])
@@ -106,44 +102,46 @@ def assign_observers(matches, observers):
     return matches
 
 # ---------------------------
-# Processing
+# File Handling
 # ---------------------------
 if matches_file and observers_file:
-    # 1) Read matches with dynamic columns
-    matches_raw = pd.read_excel(matches_file)
-    matches_raw.columns = matches_raw.columns.str.strip()
-    # محاولة العثور على الأعمدة الأساسية حتى لو كانت Unnamed
-    def find_col(cols, keyword):
-        return next(col for col in cols if keyword in str(col))
+    try:
+        matches_raw = pd.read_excel(matches_file)
+        matches_raw.columns = matches_raw.columns.str.strip()
 
-    cols = matches_raw.columns
-    matches = matches_raw.rename(columns={
-        find_col(cols, "رقم"): "رقم المباراة",
-        find_col(cols, "اريخ"): "التاريخ",
-        find_col(cols, "ملعب"): "الملعب",
-        find_col(cols, "مدين"): "المدينة",
-    })
+        def find_col(cols, keyword):
+            return next(col for col in cols if keyword in str(col))
 
-    # 2) Read observers and clean columns
-    obs_raw = pd.read_excel(observers_file)
-    obs_raw.columns = obs_raw.columns.str.strip()
+        cols = matches_raw.columns
+        matches = matches_raw.rename(columns={
+            find_col(cols, "رقم"): "رقم المباراة",
+            find_col(cols, "اريخ"): "التاريخ",
+            find_col(cols, "ملعب"): "الملعب",
+            find_col(cols, "مدين"): "المدينة",
+        })
 
-    obs_raw["الاسم الكامل"] = (
-        obs_raw["الأسم الأول"].fillna("") + " " +
-        obs_raw["الأسم الثاني"].fillna("") + " " +
-        obs_raw["أسم العائلة"].fillna("")
-    ).str.strip()
+        obs_raw = pd.read_excel(observers_file)
+        obs_raw.columns = obs_raw.columns.str.strip()
 
-    obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
+        # الاسم الكامل من أعمدة النظام
+        obs_raw["الاسم الكامل"] = (
+            obs_raw["الأسم الأول"].fillna("") + " " +
+            obs_raw["الأسم الثاني"].fillna("") + " " +
+            obs_raw["أسم العائلة"].fillna("")
+        ).str.strip()
 
-    observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+        # المدينة
+        obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
+        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
-    st.success("✅ تم تحميل الملفات بنجاح")
+        st.success("✅ تم تحميل الملفات بنجاح")
 
-    if st.button("🔄 تنفيذ التعيين"):
-        result_df = assign_observers(matches, observers)
-        st.success("✅ تم تنفيذ التعيين")
-        st.dataframe(result_df)
-        st.download_button("📥 تنزيل الملف النهائي", data=result_df.to_excel(index=False), file_name="assigned_matches.xlsx")
+        if st.button("🔄 تنفيذ التعيين"):
+            result_df = assign_observers(matches, observers)
+            st.success("✅ تم تنفيذ التعيين")
+            st.dataframe(result_df)
+            st.download_button("📥 تنزيل الملف النهائي", data=result_df.to_excel(index=False), file_name="assigned_matches.xlsx")
+    except Exception as e:
+        st.error(f"حدث خطأ أثناء المعالجة: {e}")
 else:
     st.warning("📌 يرجى رفع كلا الملفين للاستمرار.")
