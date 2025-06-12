@@ -117,7 +117,7 @@ if matches_file and observers_file:
         col_city = next((c for c in cols if "مدينة" in c), None)
 
         if not all([col_match_number, col_match_date, col_stadium, col_city]):
-    st.error(f"⚠️ الأعمدة المطلوبة غير موجودة أو غير واضحة. الأعمدة الحالية: {list(cols)}")
+            st.error(f"⚠️ الأعمدة المطلوبة غير موجودة أو غير واضحة. الأعمدة الحالية: {list(cols)}")
 
         else:
             matches = matches_raw[[col_match_number, col_match_date, col_stadium, col_city]].dropna()
@@ -144,7 +144,7 @@ if matches_file and observers_file:
             col_city_obs = next((c for c in obs_raw.columns if "مدينة" in c), None)
 
             if not all([col_id, col_first, col_family, col_city_obs]):
-    st.error(f"⚠️ الأعمدة الأساسية للمراقبين غير موجودة. الأعمدة الحالية: {list(obs_raw.columns)}")
+             st.error(f"⚠️ الأعمدة الأساسية للمراقبين غير موجودة. الأعمدة الحالية: {list(obs_raw.columns)}")
 
             else:
                 obs_raw["الاسم الكامل"] = (
