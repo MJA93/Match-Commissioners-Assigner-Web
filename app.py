@@ -3,10 +3,9 @@ import pandas as pd
 import requests
 import datetime
 import re
-# ---------------------------
-# Page Configuration
-# ---------------------------
-st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide",initial_sidebar_state="expanded")
+from io import BytesIO
+
+st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------
 # Sidebar Settings
@@ -20,7 +19,7 @@ max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومتر
 google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 
 # ---------------------------
-# File Uploads
+# Upload Section
 # ---------------------------
 st.title("📄 تعيين مراقبين للمباريات")
 st.markdown("**🔼 رفع ملفات المباريات والمراقبين بالترتيب المطلوب (Excel):**")
@@ -29,28 +28,28 @@ matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
 # ---------------------------
-# Helper: Google Maps API
+# Helper: Google Distance
 # ---------------------------
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {
-        "origins": city1,
-        "destinations": city2,
-        "key": google_api_key,
-        "units": "metric",
-        "language": "ar",
-    }
     try:
-        resp = requests.get(url, params=params).json()
-        meters = resp["rows"][0]["elements"][0]["distance"]["value"]
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        params = {
+            "origins": city1,
+            "destinations": city2,
+            "key": google_api_key,
+            "units": "metric",
+            "language": "ar",
+        }
+        response = requests.get(url, params=params).json()
+        meters = response["rows"][0]["elements"][0]["distance"]["value"]
         return meters / 1000
-    except Exception:
+    except:
         return 1e9
 
 # ---------------------------
-# Core Assigner
+# Core Assignment Function
 # ---------------------------
 def assign_observers(matches, observers):
     assignments = []
@@ -63,104 +62,89 @@ def assign_observers(matches, observers):
             assignments.append("—")
             continue
 
-        raw_date = str(row["التاريخ"]).split()[0]  # إزالة اليوم من بداية التاريخ
-        match_date = pd.to_datetime(raw_date, errors="coerce").date()
+        match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
         city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
 
-        # المرشحين
-        cand = observers.copy()
+        # المرشحون
+        candidates = observers.copy()
 
-        def valid(o):
-            rid = o["رقم المراقب"]
+        def is_valid(obs):
+            rid = obs["رقم المراقب"]
             if rid in last_dates:
-                d = last_dates[rid]
-                if (match_date - d).days < min_days_between:
+                prev_date = last_dates[rid]
+                if (match_date - prev_date).days < min_days_between:
                     return False
-                if not allow_same_day and d == match_date and o["مدينة المراقب"] == city:
+                if not allow_same_day and prev_date == match_date and obs["مدينة المراقب"] == city:
                     return False
             if use_distance:
-                dist = calculate_distance(city, o["مدينة المراقب"])
+                dist = calculate_distance(city, obs["مدينة المراقب"])
                 if dist > max_distance:
                     return False
             return True
 
-        cand = cand[cand.apply(valid, axis=1)]
+        candidates = candidates[candidates.apply(is_valid, axis=1)]
         if minimize_repeats:
-            cand = cand.sort_values(by=cand["رقم المراقب"].map(usage))
+            candidates = candidates.sort_values(by=candidates["رقم المراقب"].map(usage))
 
-        if cand.empty:
+        if candidates.empty:
             assignments.append("غير متوفر")
-            continue
-
-        chosen = cand.iloc[0]
-        rid = chosen["رقم المراقب"]
-        assignments.append(chosen["الاسم الكامل"])
-        usage[rid] += 1
-        last_dates[rid] = match_date
+        else:
+            selected = candidates.iloc[0]
+            assignments.append(selected["الاسم الكامل"])
+            rid = selected["رقم المراقب"]
+            usage[rid] += 1
+            last_dates[rid] = match_date
 
     matches["المراقب"] = assignments
     return matches
 
 # ---------------------------
-# File Handling
+# Main Logic
 # ---------------------------
 if matches_file and observers_file:
     try:
         matches_raw = pd.read_excel(matches_file, header=1)
         matches_raw.columns = matches_raw.columns.str.strip()
-        cols = matches_raw.columns
+        matches_raw = matches_raw.dropna(subset=["رقم المباراة", "التاريخ", "الملعب", "المدينة"])
 
-        col_match_number = next((c for c in cols if "رقم" in c and "مباراة" in c), None)
-        col_match_date = next((c for c in cols if "تاريخ" in c), None)
-        col_stadium = next((c for c in cols if "ملعب" in c), None)
-        col_city = next((c for c in cols if "مدينة" in c), None)
+        # تنظيف التاريخ (إزالة اليوم من بداية الخلية النصية)
+        def clean_date(value):
+            if isinstance(value, str):
+                match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", value)
+                if match:
+                    return pd.to_datetime(match.group(1), dayfirst=True)
+                return pd.NaT
+            return pd.to_datetime(value, errors="coerce")
 
-        if not all([col_match_number, col_match_date, col_stadium, col_city]):
-            st.error(f"⚠️ الأعمدة المطلوبة غير موجودة أو غير واضحة. الأعمدة الحالية: {list(cols)}")
+        matches_raw["التاريخ"] = matches_raw["التاريخ"].apply(clean_date)
+        matches_raw = matches_raw.dropna(subset=["التاريخ"])
 
-        else:
-            matches = matches_raw[[col_match_number, col_match_date, col_stadium, col_city]].dropna()
+        obs_raw = pd.read_excel(observers_file)
+        obs_raw.columns = obs_raw.columns.str.strip()
+        obs_raw["الاسم الكامل"] = (
+            obs_raw["First name"].fillna("") + " " +
+            obs_raw["2nd name"].fillna("") + " " +
+            obs_raw["Family name"].fillna("")
+        ).str.strip()
+        obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
 
-            # تنظيف التاريخ
-            def clean_date(value):
-                if isinstance(value, str):
-                    match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", value)
-                    if match:
-                        return pd.to_datetime(match.group(1), dayfirst=True)
-                    return pd.NaT
-                return pd.to_datetime(value, errors="coerce")
+        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
-            matches[col_match_date] = matches[col_match_date].apply(clean_date)
-            matches = matches.dropna(subset=[col_match_date])
+        st.success("✅ تم تحميل الملفات بنجاح")
+        st.dataframe(matches_raw.head())
+        st.dataframe(observers.head())
 
-            obs_raw = pd.read_excel(observers_file)
-            obs_raw.columns = obs_raw.columns.str.strip()
+        if st.button("🔄 تنفيذ التعيين"):
+            result = assign_observers(matches_raw.copy(), observers)
+            st.success("✅ تم تنفيذ التعيين بنجاح")
+            st.dataframe(result)
 
-            col_id = next((c for c in obs_raw.columns if "رقم" in c), None)
-            col_first = next((c for c in obs_raw.columns if "first" in c.lower()), None)
-            col_second = next((c for c in obs_raw.columns if "2nd" in c.lower()), None)
-            col_family = next((c for c in obs_raw.columns if "family" in c.lower()), None)
-            col_city_obs = next((c for c in obs_raw.columns if "مدينة" in c), None)
-
-            if not all([col_id, col_first, col_family, col_city_obs]):
-             st.error(f"⚠️ الأعمدة الأساسية للمراقبين غير موجودة. الأعمدة الحالية: {list(obs_raw.columns)}")
-
-            else:
-                obs_raw["الاسم الكامل"] = (
-                    obs_raw[col_first].fillna("") + " " +
-                    obs_raw.get(col_second, "").fillna("") + " " +
-                    obs_raw[col_family].fillna("")
-                ).str.strip()
-                obs_raw["مدينة المراقب"] = obs_raw[col_city_obs].astype(str).str.strip()
-                observers = obs_raw[[col_id, "الاسم الكامل", "مدينة المراقب"]].dropna()
-
-                st.success("✅ تم تحميل الملفات بنجاح")
-                st.dataframe(matches.head())
-                st.dataframe(observers.head())
+            output = BytesIO()
+            result.to_excel(output, index=False, engine='openpyxl')
+            st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     except Exception as e:
-        st.error(f"❌ حدث خطأ أثناء معالجة الملفات: {e}")
+        st.error(f"❌ خطأ في معالجة الملفات: {e}")
 else:
-    st.warning("يرجى رفع كلا الملفين للاستمرار.")
-
+    st.warning("📌 يرجى رفع كلا الملفين للمتابعة.")
