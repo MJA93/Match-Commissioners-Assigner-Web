@@ -106,7 +106,7 @@ def assign_observers(matches, observers):
 # ---------------------------
 if matches_file and observers_file:
     try:
-        matches_raw = pd.read_excel(matches_file)
+        matches_raw = pd.read_excel(matches_file, header=1)
         matches_raw.columns = matches_raw.columns.str.strip()
 
         def find_col(cols, keyword):
