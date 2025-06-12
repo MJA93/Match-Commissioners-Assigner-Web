@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import requests
-
+import datetime
+import re
 # ---------------------------
 # Page Configuration
 # ---------------------------
-st.set_page_config(page_title="Match Commissioners Assigner", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Match Commissioners Assigner", page_icon="⚽", layout="wide",initial_sidebar_state="expanded")
 
 # ---------------------------
 # Sidebar Settings
@@ -108,40 +109,58 @@ if matches_file and observers_file:
     try:
         matches_raw = pd.read_excel(matches_file, header=1)
         matches_raw.columns = matches_raw.columns.str.strip()
-
-        def find_col(cols, keyword):
-            return next(col for col in cols if keyword in str(col))
-
         cols = matches_raw.columns
-        matches = matches_raw.rename(columns={
-            find_col(cols, "رقم"): "رقم المباراة",
-            find_col(cols, "اريخ"): "التاريخ",
-            find_col(cols, "ملعب"): "الملعب",
-            find_col(cols, "مدين"): "المدينة",
-        })
 
-        obs_raw = pd.read_excel(observers_file)
-        obs_raw.columns = obs_raw.columns.str.strip()
+        col_match_number = next((c for c in cols if "رقم" in c and "مباراة" in c), None)
+        col_match_date = next((c for c in cols if "تاريخ" in c), None)
+        col_stadium = next((c for c in cols if "ملعب" in c), None)
+        col_city = next((c for c in cols if "مدينة" in c), None)
 
-        # الاسم الكامل من أعمدة النظام
-        obs_raw["الاسم الكامل"] = (
-            obs_raw["الأسم الأول"].fillna("") + " " +
-            obs_raw["الأسم الثاني"].fillna("") + " " +
-            obs_raw["أسم العائلة"].fillna("")
-        ).str.strip()
+        if not all([col_match_number, col_match_date, col_stadium, col_city]):
+            st.error(f"⚠️ الأعمدة المطلوبة غير موجودة أو غير واضحة.
+الأعمدة الحالية: {list(cols)}")
+        else:
+            matches = matches_raw[[col_match_number, col_match_date, col_stadium, col_city]].dropna()
 
-        # المدينة
-        obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
-        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+            # تنظيف التاريخ
+            def clean_date(value):
+                if isinstance(value, str):
+                    match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", value)
+                    if match:
+                        return pd.to_datetime(match.group(1), dayfirst=True)
+                    return pd.NaT
+                return pd.to_datetime(value, errors="coerce")
 
-        st.success("✅ تم تحميل الملفات بنجاح")
+            matches[col_match_date] = matches[col_match_date].apply(clean_date)
+            matches = matches.dropna(subset=[col_match_date])
 
-        if st.button("🔄 تنفيذ التعيين"):
-            result_df = assign_observers(matches, observers)
-            st.success("✅ تم تنفيذ التعيين")
-            st.dataframe(result_df)
-            st.download_button("📥 تنزيل الملف النهائي", data=result_df.to_excel(index=False), file_name="assigned_matches.xlsx")
+            obs_raw = pd.read_excel(observers_file)
+            obs_raw.columns = obs_raw.columns.str.strip()
+
+            col_id = next((c for c in obs_raw.columns if "رقم" in c), None)
+            col_first = next((c for c in obs_raw.columns if "first" in c.lower()), None)
+            col_second = next((c for c in obs_raw.columns if "2nd" in c.lower()), None)
+            col_family = next((c for c in obs_raw.columns if "family" in c.lower()), None)
+            col_city_obs = next((c for c in obs_raw.columns if "مدينة" in c), None)
+
+            if not all([col_id, col_first, col_family, col_city_obs]):
+                st.error(f"⚠️ الأعمدة الأساسية للمراقبين غير موجودة.
+الأعمدة الحالية: {list(obs_raw.columns)}")
+            else:
+                obs_raw["الاسم الكامل"] = (
+                    obs_raw[col_first].fillna("") + " " +
+                    obs_raw.get(col_second, "").fillna("") + " " +
+                    obs_raw[col_family].fillna("")
+                ).str.strip()
+                obs_raw["مدينة المراقب"] = obs_raw[col_city_obs].astype(str).str.strip()
+                observers = obs_raw[[col_id, "الاسم الكامل", "مدينة المراقب"]].dropna()
+
+                st.success("✅ تم تحميل الملفات بنجاح")
+                st.dataframe(matches.head())
+                st.dataframe(observers.head())
+
     except Exception as e:
-        st.error(f"حدث خطأ أثناء المعالجة: {e}")
+        st.error(f"❌ حدث خطأ أثناء معالجة الملفات: {e}")
 else:
-    st.warning("📌 يرجى رفع كلا الملفين للاستمرار.")
+    st.warning("يرجى رفع كلا الملفين للاستمرار.")
+
