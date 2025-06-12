@@ -100,26 +100,28 @@ def assign_observers(matches, observers):
 # ---------------------------
 def read_matches_file(file):
     df_raw = pd.read_excel(file, header=None)
-    header_row = None
+    match_header_index = None
 
-    for i in range(min(10, len(df_raw))):
-        row = df_raw.iloc[i].astype(str).str.strip()
-        if (
-            row.str.contains("رقم المباراة").any() and
-            row.str.contains("التاريخ").any() and
-            row.str.contains("الملعب").any() and
-            row.str.contains("المدينة").any()
-        ):
-            header_row = i
+    for i in range(len(df_raw)):
+        if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
+            match_header_index = i
             break
 
-    if header_row is None:
-        return None, "⚠️ لم يتم العثور على صف يحتوي على رؤوس الأعمدة (رقم المباراة، التاريخ، المدينة، الملعب)"
+    if match_header_index is None:
+        return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
 
-    df_matches = pd.read_excel(file, header=header_row)
+    df_matches = pd.read_excel(file, header=match_header_index)
     df_matches.columns = df_matches.columns.str.strip()
-    df_matches = df_matches.dropna(subset=["رقم المباراة", "التاريخ", "الملعب", "المدينة"])
+
+    # تأكد أن الأعمدة المطلوبة موجودة فعلاً
+    required_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
+    for col in required_cols:
+        if col not in df_matches.columns:
+            return None, f"⚠️ العمود '{col}' غير موجود في الملف"
+
+    df_matches = df_matches.dropna(subset=required_cols)
     return df_matches, None
+
 
 
 # ---------------------------
