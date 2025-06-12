@@ -6,7 +6,7 @@ import re
 # ---------------------------
 # Page Configuration
 # ---------------------------
-st.set_page_config(page_title="Match Commissioners Assigner", page_icon="⚽", layout="wide",initial_sidebar_state="expanded")
+st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide",initial_sidebar_state="expanded")
 
 # ---------------------------
 # Sidebar Settings
