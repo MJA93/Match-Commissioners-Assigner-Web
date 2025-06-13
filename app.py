@@ -1,14 +1,16 @@
 import streamlit as st
 import pandas as pd
 import requests
+import datetime
 import re
 from io import BytesIO
-from datetime import datetime
 
 st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
-# ---------------------- Sidebar ----------------------
-st.sidebar.title("⚙️ الإعدادااااات")
+# ---------------------------
+# Sidebar Settings
+# ---------------------------
+st.sidebar.title("⚙️ الإعدادات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
 minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
@@ -16,14 +18,18 @@ use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب الم
 max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
 google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 
-# ---------------------- UI ----------------------
+# ---------------------------
+# Upload Section
+# ---------------------------
 st.title("📄 تعيين مراقبين للمباريات")
 st.markdown("**🔼 رفع ملفات المباريات والمراقبين بالترتيب المطلوب (Excel):**")
 
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-# ---------------------- Google Distance ----------------------
+# ---------------------------
+# Google Maps API Helper
+# ---------------------------
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
@@ -42,51 +48,55 @@ def calculate_distance(city1, city2):
     except:
         return 1e9
 
-# ---------------------- Read Matches File ----------------------
+# ---------------------------
+# Clean date cell
+# ---------------------------
+def clean_date(value):
+    if isinstance(value, str):
+        match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", value)
+        if match:
+            return pd.to_datetime(match.group(1), dayfirst=True)
+        return pd.NaT
+    return pd.to_datetime(value, errors="coerce")
+
+# ---------------------------
+# Read matches file with dynamic header detection
+# ---------------------------
 def read_matches_file(file):
-    try:
-        df_raw = pd.read_excel(file, header=None)
-        match_header_index = None
-        for i in range(len(df_raw)):
-            row = df_raw.iloc[i].astype(str).str.strip()
-            if row.str.contains("مباراة", case=False).any():
-                match_header_index = i
-                break
-        if match_header_index is None:
-            return None, "⚠️ لم يتم العثور على صف يحتوي على 'مباراة' لتحديد بداية الجدول"
+    df_raw = pd.read_excel(file, header=None)
+    match_header_index = None
+    for i in range(len(df_raw)):
+        if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
+            match_header_index = i
+            break
+    if match_header_index is None:
+        return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
 
-        df = pd.read_excel(file, header=match_header_index)
-        df.columns = df.columns.str.strip()
+    df_matches = pd.read_excel(file, header=match_header_index)
+    df_matches.columns = df_matches.columns.str.strip()
 
-        # التأكد من الأعمدة الأساسية موجودة
-        if not all(col in df.columns for col in ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]):
-            return None, f"⚠️ الأعمدة الأساسية ناقصة. الأعمدة الحالية: {list(df.columns)}"
+    # التأكد من توفر الأعمدة الأساسية
+    required_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
+    for col in required_cols:
+        if col not in df_matches.columns:
+            return None, f"⚠️ العمود '{col}' مفقود من الملف"
 
-        # تنظيف التاريخ
-        if "التاريخ" in df.columns:
-            def clean_date(val):
-                if isinstance(val, str):
-                    m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", val)
-                    if m:
-                        return pd.to_datetime(m.group(1), dayfirst=True)
-                    return pd.NaT
-                return pd.to_datetime(val, errors="coerce")
-            df["التاريخ"] = df["التاريخ"].apply(clean_date)
-            df = df.dropna(subset=["التاريخ"])
+    df_matches = df_matches.dropna(subset=required_cols)
+    df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
+    df_matches = df_matches.dropna(subset=["التاريخ"])
 
-        return df.dropna(subset=["رقم المباراة", "الملعب", "المدينة"]), None
+    return df_matches, None
 
-    except Exception as e:
-        return None, f"❌ خطأ أثناء قراءة ملف المباريات: {e}"
-
-
-# ---------------------- Assignment Logic ----------------------
+# ---------------------------
+# Core Assignment Logic
+# ---------------------------
 def assign_observers(matches, observers):
     assignments = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
     last_dates = {}
 
     for _, row in matches.iterrows():
+        match_no = row["رقم المباراة"]
         match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
         city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
@@ -123,42 +133,48 @@ def assign_observers(matches, observers):
     matches["المراقب"] = assignments
     return matches
 
-# ---------------------- Load Matches ----------------------
-matches = None
+# ---------------------------
+# Main Logic
+# ---------------------------
 if matches_file:
-    matches, error = read_matches_file(matches_file)
-    if error:
-        st.error(error)
-    elif matches is not None and len(matches) > 0:
-        st.success("✅ تم تحميل مباريات")
-        st.dataframe(matches.head())
+    matches_raw, match_error = read_matches_file(matches_file)
+    if match_error:
+        st.warning(match_error)
+        matches_raw = None
     else:
-        st.warning("⚠️ لم يتم العثور على أي مباريات داخل الملف.")
+        st.success("✅ تم تحميل مباريات بنجاح")
+        st.dataframe(matches_raw)
 
-# ---------------------- Load Observers ----------------------
-observers = None
 if observers_file:
     try:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
+
         obs_raw["الاسم الكامل"] = (
-            obs_raw.get("First name", "") + " " +
-            obs_raw.get("2nd name", "") + " " +
-            obs_raw.get("Family name", "")
+            obs_raw["First name"].fillna("") + " " +
+            obs_raw["2nd name"].fillna("") + " " +
+            obs_raw["Family name"].fillna("")
         ).str.strip()
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
-        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
-        st.success("✅ تم تحميل المراقبين")
-        st.dataframe(observers.head())
-    except Exception as e:
-        st.error(f"❌ خطأ في ملف المراقبين: {e}")
 
-# ---------------------- Run Assignment ----------------------
-if matches is not None and observers is not None:
+        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+        st.success("✅ تم تحميل المراقبين بنجاح")
+        st.dataframe(observers)
+    except Exception as e:
+        st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
+        observers = None
+else:
+    observers = None
+
+# ---------------------------
+# Run Assignment
+# ---------------------------
+if matches_file and observers_file and matches_raw is not None:
     if st.button("🔄 تنفيذ التعيين"):
-        result = assign_observers(matches.copy(), observers)
-        st.success("✅ تم تنفيذ التعيين")
+        result = assign_observers(matches_raw.copy(), observers)
+        st.success("✅ تم تنفيذ التعيين بنجاح")
         st.dataframe(result)
+
         output = BytesIO()
-        result.to_excel(output, index=False, engine='openpyxl')
+        result.to_excel(output, index=False, engine="openpyxl")
         st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
