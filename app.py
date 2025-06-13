@@ -124,6 +124,7 @@ def assign_observers(matches, observers):
     return matches
 
 # ---------------------- المعالجة ---------------------- #
+# ---------------------- المعالجة ---------------------- #
 matches = None
 observers = None
 
@@ -157,6 +158,7 @@ if observers_file:
         st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
         observers = None
 
+# ✅ تأكد من أن الكود التالي لن يتم تنفيذه إلا إذا كانت المتغيرات موجودة
 if matches is not None and observers is not None:
     if st.button("🔄 تنفيذ التعيين"):
         result = assign_observers(matches.copy(), observers)
