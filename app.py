@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-import datetime
 import re
 from io import BytesIO
 
@@ -18,11 +17,10 @@ google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 
 # ---------------------- رفع الملفات ---------------------- #
 st.title("📄 تعيين مراقبين للمباريات")
-st.markdown("**🔼 رفع ملفات المباريات والمراقبين بالترتيب المطلوب (Excel):**")
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-# ---------------------- Google Maps ---------------------- #
+# ---------------------- حساب المسافة ---------------------- #
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
@@ -41,50 +39,46 @@ def calculate_distance(city1, city2):
     except:
         return 1e9
 
-# ---------------------- دالة قراءة ملف المباريات ---------------------- #
+# ---------------------- قراءة ملف المباريات ---------------------- #
 def read_matches_file(file):
     try:
         df_raw = pd.read_excel(file, header=None)
-        st.write("📋 عرض أول 10 صفوف من الملف:")
+        st.write("📋 أول 10 صفوف من الملف:")
         st.dataframe(df_raw.head(10))
 
-        match_header_index = None
+        header_row = None
         for i in range(len(df_raw)):
             if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
-                match_header_index = i
+                header_row = i
                 break
 
-        if match_header_index is None:
-            return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة'. تأكد من أن الجدول يحتوي على الأعمدة المطلوبة."
+        if header_row is None:
+            return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة'."
 
-        df_matches = pd.read_excel(file, header=match_header_index)
-        df_matches.columns = df_matches.columns.str.strip()
+        df = pd.read_excel(file, header=header_row)
+        df.columns = df.columns.str.strip()
 
-        # تنظيف التاريخ
-        def clean_date(value):
-            if isinstance(value, str):
-                value = re.sub(r"^\D+\s*[-–]?\s*", "", value.strip())
+        if "التاريخ" in df.columns:
+            def clean_date(value):
+                if isinstance(value, str):
+                    value = re.sub(r"^\D+\s*[-–]?\s*", "", value.strip())
+                    return pd.to_datetime(value, errors="coerce")
                 return pd.to_datetime(value, errors="coerce")
-            return pd.to_datetime(value, errors="coerce")
-
-        if "التاريخ" in df_matches.columns:
-            df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
+            df["التاريخ"] = df["التاريخ"].apply(clean_date)
 
         required_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
-        if not all(col in df_matches.columns for col in required_cols):
-            return None, f"⚠️ الأعمدة المطلوبة غير موجودة. الأعمدة الحالية: {list(df_matches.columns)}"
+        if not all(col in df.columns for col in required_cols):
+            return None, f"⚠️ الأعمدة الناقصة: {set(required_cols) - set(df.columns)}"
 
-        df_matches = df_matches.dropna(subset=required_cols)
-        if df_matches.empty:
-            return None, "⚠️ لا توجد مباريات بعد التنظيف. تأكد من أن الصفوف تحتوي على القيم المطلوبة."
-        return df_matches, None
+        df = df.dropna(subset=required_cols)
+        if df.empty:
+            return None, "⚠️ لا توجد مباريات بعد التنظيف."
+        return df, None
 
     except Exception as e:
-        return None, f"❌ خطأ أثناء قراءة الملف: {e}"
+        return None, f"❌ خطأ في قراءة ملف المباريات: {e}"
 
-
-
-# ---------------------- دالة التعيين ---------------------- #
+# ---------------------- التعيين ---------------------- #
 def assign_observers(matches, observers):
     assignments = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
@@ -113,10 +107,9 @@ def assign_observers(matches, observers):
 
         candidates = candidates[candidates.apply(is_valid, axis=1)]
         if minimize_repeats:
-             candidates["مرات التعيين"] = candidates["رقم المراقب"].map(usage)
-             candidates = candidates.sort_values(by="مرات التعيين")
-             candidates = candidates.drop(columns=["مرات التعيين"])
-
+            candidates["مرات التعيين"] = candidates["رقم المراقب"].map(usage)
+            candidates = candidates.sort_values(by="مرات التعيين")
+            candidates = candidates.drop(columns=["مرات التعيين"])
 
         if candidates.empty:
             assignments.append("غير متوفر")
@@ -130,12 +123,18 @@ def assign_observers(matches, observers):
     matches["المراقب"] = assignments
     return matches
 
-# ---------------------- المعالجة الرئيسية ---------------------- #
+# ---------------------- المعالجة ---------------------- #
+matches = None
+observers = None
+
 if matches_file:
     matches, match_error = read_matches_file(matches_file)
     if match_error:
         st.warning(match_error)
         matches = None
+    else:
+        st.success("✅ تم تحميل ملف المباريات بنجاح")
+        st.dataframe(matches.head())
 
 if observers_file:
     try:
@@ -150,15 +149,14 @@ if observers_file:
 
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
         observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+
         st.success("✅ تم تحميل المراقبين بنجاح")
         st.dataframe(observers.head())
-    except Exception as e:
-        st.error(f"❌ خطأ أثناء تحميل المراقبين: {e}")
-        observers = None
-else:
-    observers = None
 
-# ---------------------- تنفيذ التعيين ---------------------- #
+    except Exception as e:
+        st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
+        observers = None
+
 if matches is not None and observers is not None:
     if st.button("🔄 تنفيذ التعيين"):
         result = assign_observers(matches.copy(), observers)
@@ -167,4 +165,4 @@ if matches is not None and observers is not None:
 
         output = BytesIO()
         result.to_excel(output, index=False, engine='openpyxl')
-        st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("📥 تحميل النتائج", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
