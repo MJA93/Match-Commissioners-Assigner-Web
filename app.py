@@ -48,6 +48,7 @@ def read_matches_file(file):
         st.markdown("📋 **أول 10 صفوف من ملف المباريات (للمراجعة):**")
         st.dataframe(df_raw.head(10))
 
+        # ابحث عن الصف الذي يحتوي على "رقم المباراة"
         match_header_index = None
         for i in range(len(df_raw)):
             if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
@@ -55,10 +56,14 @@ def read_matches_file(file):
                 break
 
         if match_header_index is None:
-            return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة'. تأكد من أن الجدول يحتوي على الأعمدة المطلوبة."
+            return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة'."
 
+        # اقرأ الملف مجددًا من الصف الصحيح
         df_matches = pd.read_excel(file, header=match_header_index)
         df_matches.columns = df_matches.columns.str.strip()
+
+        # عرض الأعمدة المكتشفة للمستخدم
+        st.markdown(f"📑 الأعمدة المكتشفة: {list(df_matches.columns)}")
 
         # تنظيف التاريخ
         def clean_date(value):
@@ -76,11 +81,13 @@ def read_matches_file(file):
 
         df_matches = df_matches.dropna(subset=required_cols)
         if df_matches.empty:
-            return None, "⚠️ لا توجد مباريات بعد التنظيف. تأكد من أن الصفوف تحتوي على القيم المطلوبة."
+            return None, "⚠️ لا توجد مباريات بعد التنظيف."
+
         return df_matches, None
 
     except Exception as e:
         return None, f"❌ خطأ أثناء قراءة الملف: {e}"
+
 
 # ---------------------- دالة التعيين ---------------------- #
 def assign_observers(matches, observers):
