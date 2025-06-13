@@ -5,9 +5,9 @@ import datetime
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="Match Commissioners Assigner", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
-# ----------------- الإعدادات -----------------
+# ---------------------- الإعدادات الجانبية ----------------------
 st.sidebar.title("⚙️ الإعدادات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
@@ -16,7 +16,13 @@ use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب الم
 max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
 google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 
-# ----------------- دالة حساب المسافة -----------------
+# ---------------------- عنوان البرنامج ----------------------
+st.title("📄 تعيين مراقبين للمباريات")
+st.markdown("**🔼 رفع ملفات المباريات والمراقبين بالترتيب المطلوب (Excel):**")
+matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
+observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
+
+# ---------------------- دالة حساب المسافة ----------------------
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
@@ -35,43 +41,16 @@ def calculate_distance(city1, city2):
     except:
         return 1e9
 
-# ----------------- دالة قراءة ملف المباريات -----------------
-def read_matches_file(file):
-    try:
-        df = pd.read_excel(file)
-        df.columns = df.columns.str.strip()
-
-        required = ["التاريخ", "الملعب", "المدينة"]
-        for col in required:
-            if col not in df.columns:
-                return None, f"⚠️ الملف لا يحتوي على العمود: {col}"
-
-        def clean_date(val):
-            if isinstance(val, str):
-                match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", val)
-                if match:
-                    return pd.to_datetime(match.group(1), dayfirst=True)
-                return pd.NaT
-            return pd.to_datetime(val, errors="coerce")
-
-        df["التاريخ"] = df["التاريخ"].apply(clean_date)
-        df = df.dropna(subset=["التاريخ", "الملعب", "المدينة"])
-
-        return df, None
-    except Exception as e:
-        return None, f"⚠️ خطأ أثناء قراءة الملف: {e}"
-
-# ----------------- دالة التعيين -----------------
+# ---------------------- دالة التعيين ----------------------
 def assign_observers(matches, observers):
     assignments = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
     last_dates = {}
 
     for _, row in matches.iterrows():
-        date = row["التاريخ"]
-        city = row["المدينة"]
-        stadium = row["الملعب"]
-        match_no = row["رقم المباراة"] if "رقم المباراة" in row else ""
+        match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
+        city = str(row["المدينة"]).strip()
+        stadium = str(row["الملعب"]).strip()
 
         candidates = observers.copy()
 
@@ -79,9 +58,9 @@ def assign_observers(matches, observers):
             rid = obs["رقم المراقب"]
             if rid in last_dates:
                 prev_date = last_dates[rid]
-                if (date - prev_date).days < min_days_between:
+                if (match_date - prev_date).days < min_days_between:
                     return False
-                if not allow_same_day and prev_date == date and obs["مدينة المراقب"] == city:
+                if not allow_same_day and prev_date == match_date and obs["مدينة المراقب"] == city:
                     return False
             if use_distance:
                 dist = calculate_distance(city, obs["مدينة المراقب"])
@@ -100,22 +79,55 @@ def assign_observers(matches, observers):
             assignments.append(selected["الاسم الكامل"])
             rid = selected["رقم المراقب"]
             usage[rid] += 1
-            last_dates[rid] = date
+            last_dates[rid] = match_date
 
     matches["المراقب"] = assignments
     return matches
 
-# ----------------- رفع الملفات -----------------
-st.title("📄 تعيين مراقبين المباريات")
-matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
-observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
+# ---------------------- دالة قراءة ملف المباريات ----------------------
+def read_matches_file(file):
+    try:
+        df_raw = pd.read_excel(file, header=None)
+        match_header_index = None
+        for i in range(len(df_raw)):
+            if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
+                match_header_index = i
+                break
+        if match_header_index is None:
+            return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
 
-if matches_file and observers_file:
-    matches, match_error = read_matches_file(matches_file)
+        df_matches = pd.read_excel(file, header=match_header_index)
+        df_matches.columns = df_matches.columns.str.strip()
+        df_matches = df_matches.dropna(subset=["التاريخ", "الملعب", "المدينة"])
+
+        def clean_date(value):
+            if isinstance(value, str):
+                match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", value)
+                if match:
+                    return pd.to_datetime(match.group(1), dayfirst=True)
+                return pd.NaT
+            return pd.to_datetime(value, errors="coerce")
+
+        df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
+        df_matches = df_matches.dropna(subset=["التاريخ"])
+
+        return df_matches, None
+    except Exception as e:
+        return None, f"❌ خطأ في قراءة ملف المباريات: {e}"
+
+# ---------------------- معالجة ملف المباريات ----------------------
+matches_raw = None
+if matches_file:
+    matches_raw, match_error = read_matches_file(matches_file)
     if match_error:
         st.error(match_error)
-        st.stop()
+    else:
+        st.success("✅ تم تحميل ملف المباريات بنجاح")
+        st.dataframe(matches_raw.head())
 
+# ---------------------- معالجة ملف المراقبين ----------------------
+observers = None
+if observers_file:
     try:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
@@ -129,20 +141,18 @@ if matches_file and observers_file:
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
         observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
-        st.success("✅ تم تحميل الملفات بنجاح")
-        st.dataframe(matches.head())
+        st.success("✅ تم تحميل ملف المراقبين بنجاح")
         st.dataframe(observers.head())
-
-        if st.button("🔄 تنفيذ التعيين"):
-            result = assign_observers(matches.copy(), observers)
-            st.success("✅ تم التعيين بنجاح")
-            st.dataframe(result)
-
-            output = BytesIO()
-            result.to_excel(output, index=False, engine='openpyxl')
-            st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
     except Exception as e:
-        st.error(f"❌ خطأ أثناء قراءة ملف المراقبين: {e}")
-else:
-    st.info("📌 الرجاء رفع كلا الملفين للمتابعة.")
+        st.error(f"❌ خطأ في ملف المراقبين: {e}")
+
+# ---------------------- زر التعيين وتنزيل النتائج ----------------------
+if matches_raw is not None and observers is not None:
+    if st.button("🔄 تنفيذ التعيين"):
+        result = assign_observers(matches_raw.copy(), observers)
+        st.success("✅ تم تنفيذ التعيين")
+        st.dataframe(result)
+
+        output = BytesIO()
+        result.to_excel(output, index=False, engine='openpyxl')
+        st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
