@@ -63,13 +63,15 @@ def read_matches_file(file):
         return None, "⚠️ الأعمدة الأساسية غير مكتملة"
 
     # تنظيف التاريخ
-    def clean_date(value):
-        if isinstance(value, str):
-            match = re.search(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})", value)
-            if match:
-                return pd.to_datetime(match.group(1), dayfirst=True, errors='coerce')
+   def clean_date(value):
+    if isinstance(value, str):
+        # يحذف أي كلمة قبل التاريخ مثل "الجمعة -"
+        value = re.sub(r"^\D+\s*[-–]\s*", "", value.strip())
+        try:
+            return pd.to_datetime(value, errors='coerce')
+        except:
             return pd.NaT
-        return pd.to_datetime(value, errors='coerce')
+    return pd.to_datetime(value, errors='coerce')
 
     df_matches[col_date] = df_matches[col_date].apply(clean_date)
     df_matches = df_matches.dropna(subset=[col_match, col_date, col_city, col_stadium])
