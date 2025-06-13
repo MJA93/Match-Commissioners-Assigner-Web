@@ -26,6 +26,12 @@ st.markdown("**🔼 رفع ملفات المباريات والمراقبين ب
 
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
+# 👇 عرض أول 10 صفوف لمراجعة محتوى ملف المباريات
+if matches_file:
+    df_debug = pd.read_excel(matches_file, header=None, nrows=10)
+    st.info("🧪 أول 10 صفوف من ملف المباريات (للمراجعة):")
+    st.dataframe(df_debug)
+
 
 # ---------------------------
 # Google Maps API Helper
@@ -74,6 +80,7 @@ def read_matches_file(file):
 
     df_matches = pd.read_excel(file, header=match_header_index)
     df_matches.columns = df_matches.columns.str.strip()
+    
 
     # التأكد من توفر الأعمدة الأساسية
     required_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
