@@ -48,14 +48,21 @@ def read_matches_file(file):
         df_raw = pd.read_excel(file, header=None)
         match_header_index = None
         for i in range(len(df_raw)):
-            if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
+            row = df_raw.iloc[i].astype(str).str.strip()
+            if row.str.contains("مباراة", case=False).any():
                 match_header_index = i
                 break
         if match_header_index is None:
-            return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة'."
-        
+            return None, "⚠️ لم يتم العثور على صف يحتوي على 'مباراة' لتحديد بداية الجدول"
+
         df = pd.read_excel(file, header=match_header_index)
         df.columns = df.columns.str.strip()
+
+        # التأكد من الأعمدة الأساسية موجودة
+        if not all(col in df.columns for col in ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]):
+            return None, f"⚠️ الأعمدة الأساسية ناقصة. الأعمدة الحالية: {list(df.columns)}"
+
+        # تنظيف التاريخ
         if "التاريخ" in df.columns:
             def clean_date(val):
                 if isinstance(val, str):
@@ -66,9 +73,12 @@ def read_matches_file(file):
                 return pd.to_datetime(val, errors="coerce")
             df["التاريخ"] = df["التاريخ"].apply(clean_date)
             df = df.dropna(subset=["التاريخ"])
-        return df, None
+
+        return df.dropna(subset=["رقم المباراة", "الملعب", "المدينة"]), None
+
     except Exception as e:
         return None, f"❌ خطأ أثناء قراءة ملف المباريات: {e}"
+
 
 # ---------------------- Assignment Logic ----------------------
 def assign_observers(matches, observers):
