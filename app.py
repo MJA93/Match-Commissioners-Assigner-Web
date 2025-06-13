@@ -55,20 +55,33 @@ def clean_date(value):
 def read_matches_file(file):
     df_raw = pd.read_excel(file, header=None)
     header_row = None
+
     for i in range(len(df_raw)):
         if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
             header_row = i
             break
+
     if header_row is None:
         return None, "⚠️ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
+
     df_matches = pd.read_excel(file, header=header_row)
     df_matches.columns = df_matches.columns.str.strip()
+
+    expected_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
+    missing = [col for col in expected_cols if col not in df_matches.columns]
+
+    if missing:
+        return None, f"⚠️ لم يتم العثور على الأعمدة التالية في الملف: {missing}"
+
     df_matches = df_matches.dropna(subset=["الملعب", "المدينة", "التاريخ"])
     if "رقم المباراة" in df_matches.columns:
         df_matches = df_matches[df_matches["رقم المباراة"].notna()]
+
     df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
     df_matches = df_matches.dropna(subset=["التاريخ"])
+
     return df_matches, None
+
 
 # دالة تعيين المراقبين
 def assign_observers(matches, observers):
