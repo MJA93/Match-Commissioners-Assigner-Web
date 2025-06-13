@@ -113,7 +113,10 @@ def assign_observers(matches, observers):
 
         candidates = candidates[candidates.apply(is_valid, axis=1)]
         if minimize_repeats:
-            candidates = candidates.sort_values(by=candidates["رقم المراقب"].map(usage))
+             candidates["مرات التعيين"] = candidates["رقم المراقب"].map(usage)
+             candidates = candidates.sort_values(by="مرات التعيين")
+             candidates = candidates.drop(columns=["مرات التعيين"])
+
 
         if candidates.empty:
             assignments.append("غير متوفر")
