@@ -63,7 +63,7 @@ def read_matches_file(file):
         return None, "⚠️ الأعمدة الأساسية غير مكتملة"
 
     # تنظيف التاريخ
-   def clean_date(value):
+def clean_date(value):
     if isinstance(value, str):
         # يحذف أي كلمة قبل التاريخ مثل "الجمعة -"
         value = re.sub(r"^\D+\s*[-–]\s*", "", value.strip())
