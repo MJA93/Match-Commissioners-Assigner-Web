@@ -94,19 +94,21 @@ def assign_observers(matches, observers):
     last_dates = {}
 
     for _, row in matches.iterrows():
+        match_no = row.get("رقم المباراة", "")
         match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
         city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
 
+        # تصفية المراقبين
         candidates = observers.copy()
 
         def is_valid(obs):
             rid = obs["رقم المراقب"]
             if rid in last_dates:
-                prev = last_dates[rid]
-                if (match_date - prev).days < min_days_between:
+                prev_date = last_dates[rid]
+                if (match_date - prev_date).days < min_days_between:
                     return False
-                if not allow_same_day and match_date == prev and obs["مدينة المراقب"] == city:
+                if not allow_same_day and prev_date == match_date and obs["مدينة المراقب"] == city:
                     return False
             if use_distance:
                 dist = calculate_distance(city, obs["مدينة المراقب"])
@@ -115,20 +117,23 @@ def assign_observers(matches, observers):
             return True
 
         candidates = candidates[candidates.apply(is_valid, axis=1)]
-        if minimize_repeats:
+
+        # حل الخطأ هنا
+        if minimize_repeats and "رقم المراقب" in candidates.columns:
             candidates = candidates.sort_values(by=candidates["رقم المراقب"].map(usage))
 
         if candidates.empty:
             assignments.append("غير متوفر")
         else:
-            chosen = candidates.iloc[0]
-            assignments.append(chosen["الاسم الكامل"])
-            rid = chosen["رقم المراقب"]
+            selected = candidates.iloc[0]
+            rid = selected["رقم المراقب"]
+            assignments.append(selected["الاسم الكامل"])
             usage[rid] += 1
             last_dates[rid] = match_date
 
     matches["المراقب"] = assignments
     return matches
+
 
 # ------------------------------
 # المعالجة الرئيسية
