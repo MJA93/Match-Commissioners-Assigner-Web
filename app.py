@@ -25,33 +25,44 @@ observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"
 # دالة قراءة ملف المباريات
 # ------------------------------
 def read_matches_file(file):
-    df_raw = pd.read_excel(file, header=None)
-    match_header_index = None
-    for i in range(len(df_raw)):
-        if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
-            match_header_index = i
-            break
-    if match_header_index is None:
-        return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة' لتحديد بداية الجدول"
+    try:
+        df_raw = pd.read_excel(file, header=None)
+        st.write("📋 عرض أول 10 صفوف من الملف:")
+        st.dataframe(df_raw.head(10))
 
-    df_matches = pd.read_excel(file, header=match_header_index)
-    df_matches.columns = df_matches.columns.str.strip()
+        match_header_index = None
+        for i in range(len(df_raw)):
+            if df_raw.iloc[i].astype(str).str.contains("رقم المباراة").any():
+                match_header_index = i
+                break
 
-    def clean_date(value):
-        if isinstance(value, str):
-            value = re.sub(r"^\D+\s*[-–]\s*", "", value.strip())
+        if match_header_index is None:
+            return None, "❌ لم يتم العثور على صف يحتوي على 'رقم المباراة'. تأكد من أن الجدول يحتوي على الأعمدة المطلوبة."
+
+        df_matches = pd.read_excel(file, header=match_header_index)
+        df_matches.columns = df_matches.columns.str.strip()
+
+        # تنظيف التاريخ
+        def clean_date(value):
+            if isinstance(value, str):
+                value = re.sub(r"^\D+\s*[-–]?\s*", "", value.strip())
+                return pd.to_datetime(value, errors="coerce")
             return pd.to_datetime(value, errors="coerce")
-        return pd.to_datetime(value, errors="coerce")
 
-    if "التاريخ" in df_matches.columns:
-        df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
+        if "التاريخ" in df_matches.columns:
+            df_matches["التاريخ"] = df_matches["التاريخ"].apply(clean_date)
 
-    required = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
-    if not all(col in df_matches.columns for col in required):
-        return None, f"⚠️ الأعمدة المطلوبة ناقصة. الأعمدة الحالية: {list(df_matches.columns)}"
+        required_cols = ["رقم المباراة", "التاريخ", "الملعب", "المدينة"]
+        if not all(col in df_matches.columns for col in required_cols):
+            return None, f"⚠️ الأعمدة المطلوبة غير موجودة. الأعمدة الحالية: {list(df_matches.columns)}"
 
-    df_matches = df_matches.dropna(subset=required)
-    return df_matches, None
+        df_matches = df_matches.dropna(subset=required_cols)
+        if df_matches.empty:
+            return None, "⚠️ لا توجد مباريات بعد التنظيف. تأكد من أن الصفوف تحتوي على القيم المطلوبة."
+        return df_matches, None
+
+    except Exception as e:
+        return None, f"❌ خطأ أثناء قراءة الملف: {e}"
 
 # ------------------------------
 # دالة حساب المسافة
