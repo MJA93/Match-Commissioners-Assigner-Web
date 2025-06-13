@@ -8,7 +8,7 @@ from io import BytesIO
 st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide")
 
 # الإعدادات الجانبية
-st.sidebar.title("⚙️ الإعدادات")
+st.sidebar.title("⚙️ الإعدادااات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
 minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
