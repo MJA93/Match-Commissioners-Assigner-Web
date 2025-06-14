@@ -81,10 +81,14 @@ def read_matches_file(file):
 # ---------------------- التعيين ---------------------- #
 def assign_observers(matches, observers):
     assignments = []
+    observer_ids = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
     last_dates = {}
 
-    for _, row in matches.iterrows():
+    progress_bar = st.progress(0)
+    total = len(matches)
+
+    for idx, (_, row) in enumerate(matches.iterrows()):
         match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
         city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
@@ -106,6 +110,7 @@ def assign_observers(matches, observers):
             return True
 
         candidates = candidates[candidates.apply(is_valid, axis=1)]
+
         if minimize_repeats:
             candidates["مرات التعيين"] = candidates["رقم المراقب"].map(usage)
             candidates = candidates.sort_values(by="مرات التعيين")
@@ -113,14 +118,19 @@ def assign_observers(matches, observers):
 
         if candidates.empty:
             assignments.append("غير متوفر")
+            observer_ids.append("")
         else:
             selected = candidates.iloc[0]
             assignments.append(selected["الاسم الكامل"])
+            observer_ids.append(selected["رقم المراقب"])
             rid = selected["رقم المراقب"]
             usage[rid] += 1
             last_dates[rid] = match_date
 
+        progress_bar.progress((idx + 1) / total)
+
     matches["المراقب"] = assignments
+    matches["رقم المراقب"] = observer_ids
     return matches
 
 # ---------------------- المعالجة ---------------------- #
@@ -141,6 +151,7 @@ if observers_file:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
 
+        # ✅ تعديل ترتيب الاسم: الاسم الأول ثم الثاني ثم العائلة
         obs_raw["الاسم الكامل"] = (
             obs_raw["First name"].fillna("") + " " +
             obs_raw["2nd name"].fillna("") + " " +
@@ -157,7 +168,7 @@ if observers_file:
         st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
         observers = None
 
-# ✅ تأكد من أن الكود التالي لن يتم تنفيذه إلا إذا كانت المتغيرات موجودة
+# ✅ تنفيذ التعيين عند توفر الملفات
 if matches is not None and observers is not None:
     st.markdown("### ✅ جاهز للتعيين")
     if st.button("🔄 تنفيذ التعيين"):
