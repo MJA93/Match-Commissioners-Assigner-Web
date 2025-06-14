@@ -4,6 +4,7 @@ import requests
 import re
 import json
 from io import BytesIO
+from datetime import datetime
 
 st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
@@ -16,7 +17,7 @@ use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب الم
 google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
 
-# ---------------------- تحميل الكاش للمسافات ---------------------- #
+# ---------------------- تحميل كاش المسافات ---------------------- #
 try:
     with open("distance_cache.json", "r", encoding="utf-8") as f:
         distance_cache = json.load(f)
@@ -35,17 +36,21 @@ def google_maps_distance(city1, city2):
     }
     response = requests.get(url, params=params)
     data = response.json()
+
     if data.get("status") != "OK":
-        raise ValueError(f"API error: {data.get('status')}")
+        raise ValueError(f"API status error: {data.get('status')}")
+
     element = data["rows"][0]["elements"][0]
     if element["status"] != "OK":
-        raise ValueError(f"Element error: {element['status']}")
+        raise ValueError(f"Element status: {element['status']}")
+
     return element["distance"]["value"] / 1000
 
 @st.cache_data(show_spinner=False)
 def calculate_distance(city1, city2):
     if city1 == city2:
         return 0
+
     key1 = f"{city1}|{city2}"
     key2 = f"{city2}|{city1}"
 
@@ -65,6 +70,8 @@ def calculate_distance(city1, city2):
         with open("distance_cache.json", "w", encoding="utf-8") as f:
             json.dump(distance_cache, f, ensure_ascii=False, indent=2)
         return 1e9
+
+
 
 # ---------------------- قراءة ملف المباريات ---------------------- #
 def read_matches_file(file):
