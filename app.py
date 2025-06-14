@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import re
 from io import BytesIO
+from datetime import datetime
 
 st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
@@ -20,10 +21,15 @@ st.title("📄 تعيين مراقبين للمباريات")
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-# ---------------------- حساب المسافة ---------------------- #
+# ---------------------- حساب المسافة مع الكاش ---------------------- #
+distance_cache = {}
+
 def calculate_distance(city1, city2):
     if not (use_distance and google_api_key):
         return 0
+    key = (city1.strip(), city2.strip())
+    if key in distance_cache:
+        return distance_cache[key]
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {
@@ -35,9 +41,11 @@ def calculate_distance(city1, city2):
         }
         response = requests.get(url, params=params).json()
         meters = response["rows"][0]["elements"][0]["distance"]["value"]
-        return meters / 1000
+        km = meters / 1000
     except:
-        return 1e9
+        km = 1e9
+    distance_cache[key] = km
+    return km
 
 # ---------------------- قراءة ملف المباريات ---------------------- #
 def read_matches_file(file):
@@ -79,15 +87,13 @@ def read_matches_file(file):
         return None, f"❌ خطأ في قراءة ملف المباريات: {e}"
 
 # ---------------------- التعيين ---------------------- #
-import time  # ✅ إضافة المكتبة المطلوبة
-
 def assign_observers(matches, observers):
     assignments = []
     observer_ids = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
     last_dates = {}
 
-    progress_bar = st.progress(0)
+    progress = st.progress(0, text="🔄 جاري التعيين...")
     total = len(matches)
 
     for idx, (_, row) in enumerate(matches.iterrows()):
@@ -120,17 +126,17 @@ def assign_observers(matches, observers):
 
         if candidates.empty:
             assignments.append("غير متوفر")
-            observer_ids.append("")
+            observer_ids.append("—")
         else:
             selected = candidates.iloc[0]
-            assignments.append(selected["الاسم الكامل"])
+            full_name = f"{selected['First name']} {selected['2nd name']} {selected['Family name']}".strip()
+            assignments.append(full_name)
             observer_ids.append(selected["رقم المراقب"])
             rid = selected["رقم المراقب"]
             usage[rid] += 1
             last_dates[rid] = match_date
 
-        progress_bar.progress((idx + 1) / total)
-        time.sleep(0.01)  # ✅ تأخير بسيط لتحديث الواجهة
+        progress.progress((idx + 1) / total, text=f"تم التعيين لـ {idx + 1} من {total} مباراة")
 
     matches["المراقب"] = assignments
     matches["رقم المراقب"] = observer_ids
@@ -154,24 +160,15 @@ if observers_file:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
 
-        # ✅ تعديل ترتيب الاسم: الاسم الأول ثم الثاني ثم العائلة
-        obs_raw["الاسم الكامل"] = (
-            obs_raw["First name"].fillna("") + " " +
-            obs_raw["2nd name"].fillna("") + " " +
-            obs_raw["Family name"].fillna("")
-        ).str.strip()
-
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
-        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
 
+        observers = obs_raw[["رقم المراقب", "First name", "2nd name", "Family name", "مدينة المراقب"]].dropna()
         st.success("✅ تم تحميل المراقبين بنجاح")
         st.dataframe(observers.head())
-
     except Exception as e:
         st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
         observers = None
 
-# ✅ تنفيذ التعيين عند توفر الملفات
 if matches is not None and observers is not None:
     st.markdown("### ✅ جاهز للتعيين")
     if st.button("🔄 تنفيذ التعيين"):
