@@ -124,7 +124,6 @@ def assign_observers(matches, observers):
     return matches
 
 # ---------------------- المعالجة ---------------------- #
-# ---------------------- المعالجة ---------------------- #
 matches = None
 observers = None
 
@@ -160,11 +159,15 @@ if observers_file:
 
 # ✅ تأكد من أن الكود التالي لن يتم تنفيذه إلا إذا كانت المتغيرات موجودة
 if matches is not None and observers is not None:
+    st.markdown("### ✅ جاهز للتعيين")
     if st.button("🔄 تنفيذ التعيين"):
-        result = assign_observers(matches.copy(), observers)
-        st.success("✅ تم تنفيذ التعيين بنجاح")
-        st.dataframe(result)
+        try:
+            result = assign_observers(matches.copy(), observers)
+            st.success("✅ تم تنفيذ التعيين بنجاح")
+            st.dataframe(result)
 
-        output = BytesIO()
-        result.to_excel(output, index=False, engine='openpyxl')
-        st.download_button("📥 تحميل النتائج", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            output = BytesIO()
+            result.to_excel(output, index=False, engine='openpyxl')
+            st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            st.error(f"❌ خطأ أثناء تنفيذ التعيين: {e}")
