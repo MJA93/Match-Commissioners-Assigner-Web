@@ -79,6 +79,8 @@ def read_matches_file(file):
         return None, f"❌ خطأ في قراءة ملف المباريات: {e}"
 
 # ---------------------- التعيين ---------------------- #
+import time  # ✅ إضافة المكتبة المطلوبة
+
 def assign_observers(matches, observers):
     assignments = []
     observer_ids = []
@@ -128,6 +130,7 @@ def assign_observers(matches, observers):
             last_dates[rid] = match_date
 
         progress_bar.progress((idx + 1) / total)
+        time.sleep(0.01)  # ✅ تأخير بسيط لتحديث الواجهة
 
     matches["المراقب"] = assignments
     matches["رقم المراقب"] = observer_ids
