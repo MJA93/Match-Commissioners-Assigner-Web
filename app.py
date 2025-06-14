@@ -3,37 +3,30 @@ import pandas as pd
 import requests
 import re
 from io import BytesIO
-from functools import lru_cache
-from datetime import datetime
 
-st.set_page_config(page_title="Match Commissioners Assigner", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
-# ---------------- إعدادات الواجهة ---------------- #
+# ---------------------- الإعدادات ---------------------- #
 st.sidebar.title("⚙️ الإعدادات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
-min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", min_value=0, value=2)
+min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
 minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
-use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب المسافة", value=True)
-max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", min_value=1, value=200)
-google_api_key = st.sidebar.text_input("🔑 Google Maps API", type="password")
+use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب المسافة", value=False)
+max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
+google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
 
-# ---------------- تحميل الملفات ---------------- #
+# ---------------------- رفع الملفات ---------------------- #
 st.title("📄 تعيين مراقبين للمباريات")
-matches_file = st.file_uploader("📥 ملف المباريات", type="xlsx")
-observers_file = st.file_uploader("📥 ملف المراقبين", type="xlsx")
+matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
+observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-# ---------------- دالة التصحيح ---------------- #
-def correct_city(city):
-    city = str(city).strip()
-    return "الهفوف" if city == "الأحساء" else city
-
-# ---------------- التخزين المؤقت للمسافات ---------------- #
-@lru_cache(maxsize=10000)
+# ---------------------- حساب المسافة ---------------------- #
+@st.cache_data(show_spinner=False)
 def calculate_distance(city1, city2):
+    if city1 == city2:
+        return 0  # نفس المدينة
     if not (use_distance and google_api_key):
         return 0
-    city1 = correct_city(city1)
-    city2 = correct_city(city2)
     try:
         url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {
@@ -44,16 +37,18 @@ def calculate_distance(city1, city2):
             "language": "ar",
         }
         response = requests.get(url, params=params).json()
-        meters = response["rows"][0]["elements"][0]["distance"]["value"]
+        if response["status"] != "OK":
+            return 1e9
+        meters = response["rows"][0]["elements"][0].get("distance", {}).get("value", 1e9)
         return meters / 1000
     except:
         return 1e9
 
-# ---------------- قراءة ملف المباريات ---------------- #
+# ---------------------- قراءة ملف المباريات ---------------------- #
 def read_matches_file(file):
     try:
         df_raw = pd.read_excel(file, header=None)
-        st.write("📋 أول 10 صفوف من الملف (للمراجعة):")
+        st.write("📋 أول 10 صفوف من الملف:")
         st.dataframe(df_raw.head(10))
 
         header_row = None
@@ -84,65 +79,60 @@ def read_matches_file(file):
         if df.empty:
             return None, "⚠️ لا توجد مباريات بعد التنظيف."
         return df, None
+
     except Exception as e:
         return None, f"❌ خطأ في قراءة ملف المباريات: {e}"
 
-# ---------------- التعيين ---------------- #
+# ---------------------- التعيين ---------------------- #
 def assign_observers(matches, observers):
     assignments = []
     usage = {rid: 0 for rid in observers["رقم المراقب"]}
     last_dates = {}
 
-    progress = st.progress(0, text="🔄 جاري تنفيذ التعيين ...")
-    total = len(matches)
+    progress = st.progress(0, text="🔄 جاري تعيين المراقبين...")
 
-    for i, row in matches.iterrows():
+    for idx, row in matches.iterrows():
         match_date = pd.to_datetime(row["التاريخ"], errors="coerce").date()
-        city = correct_city(row["المدينة"])
+        city = str(row["المدينة"]).strip()
         stadium = str(row["الملعب"]).strip()
-        location = stadium if stadium else city
 
         candidates = observers.copy()
 
         def is_valid(obs):
             rid = obs["رقم المراقب"]
-            prev_date = last_dates.get(rid)
-
-            if prev_date:
+            if rid in last_dates:
+                prev_date = last_dates[rid]
                 if (match_date - prev_date).days < min_days_between:
                     return False
                 if not allow_same_day and prev_date == match_date and obs["مدينة المراقب"] == city:
                     return False
-
             if use_distance:
-                dist = calculate_distance(location, obs["مدينة المراقب"])
+                dist = calculate_distance(city, obs["مدينة المراقب"])
                 if dist > max_distance:
                     return False
             return True
 
         candidates = candidates[candidates.apply(is_valid, axis=1)]
-
         if minimize_repeats:
             candidates["مرات التعيين"] = candidates["رقم المراقب"].map(usage)
             candidates = candidates.sort_values(by="مرات التعيين")
             candidates = candidates.drop(columns=["مرات التعيين"])
 
         if candidates.empty:
-            assignments.append(("غير متوفر", ""))
+            assignments.append("غير متوفر")
         else:
             selected = candidates.iloc[0]
-            assignments.append((selected["الاسم الكامل"], selected["رقم المراقب"]))
+            assignments.append(f"{selected['الاسم الكامل']}\n[{selected['رقم المراقب']}]")
             rid = selected["رقم المراقب"]
             usage[rid] += 1
             last_dates[rid] = match_date
 
-        progress.progress((i + 1) / total, text=f"🔄 تنفيذ التعيين ({i+1}/{total})")
+        progress.progress((idx + 1) / len(matches), text=f"🕐 جاري التعيين... ({idx+1}/{len(matches)})")
 
-    matches["المراقب"] = [x[0] for x in assignments]
-    matches["رقم المراقب"] = [x[1] for x in assignments]
+    matches["المراقب"] = assignments
     return matches
 
-# ---------------- قراءة البيانات ---------------- #
+# ---------------------- المعالجة ---------------------- #
 matches = None
 observers = None
 
@@ -153,24 +143,31 @@ if matches_file:
         matches = None
     else:
         st.success("✅ تم تحميل ملف المباريات بنجاح")
+        st.dataframe(matches.head())
 
 if observers_file:
     try:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
+
+        # تصحيح ترتيب الاسم: الأول + الثاني + العائلة
         obs_raw["الاسم الكامل"] = (
-            obs_raw["Family name"].fillna("") + " " +
+            obs_raw["First name"].fillna("") + " " +
             obs_raw["2nd name"].fillna("") + " " +
-            obs_raw["First name"].fillna("")
+            obs_raw["Family name"].fillna("")
         ).str.strip()
+
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
         observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
+
         st.success("✅ تم تحميل المراقبين بنجاح")
+        st.dataframe(observers.head())
+
     except Exception as e:
         st.error(f"❌ خطأ في قراءة ملف المراقبين: {e}")
         observers = None
 
-# ---------------- تنفيذ التعيين ---------------- #
+# ---------------------- تنفيذ التعيين ---------------------- #
 if matches is not None and observers is not None:
     st.markdown("### ✅ جاهز للتعيين")
     if st.button("🔄 تنفيذ التعيين"):
