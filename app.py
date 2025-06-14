@@ -14,7 +14,7 @@ allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس ا�
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
 minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
 use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب المسافة", value=True)
-google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
+google_api_key = st.sidebar.text_input("🔑 Google Maps API Key", type="password")
 max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
 
 # ---------------------- تحميل كاش المسافات ---------------------- #
@@ -71,9 +71,10 @@ def calculate_distance(city1, city2):
             json.dump(distance_cache, f, ensure_ascii=False, indent=2)
         return 1e9
 
-
-
 # ---------------------- قراءة ملف المباريات ---------------------- #
+matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
+observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
+
 def read_matches_file(file):
     try:
         df_raw = pd.read_excel(file, header=None)
@@ -146,7 +147,7 @@ def assign_observers(matches, observers):
     matches["المراقب"] = assignments
     return matches
 
-# ---------------------- المعالجة ---------------------- #
+# ---------------------- تنفيذ المعالجة ---------------------- #
 matches = None
 observers = None
 
@@ -169,7 +170,7 @@ if observers_file:
             obs_raw["Family name"].fillna("")
         ).str.strip()
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
-        observers = obs_raw[["\u0631\u0642\u0645 \u0627\u0644\u0645\u0631\u0627\u0642\u0628", "\u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644", "\u0645\u062f\u064a\u0646\u0629 \u0627\u0644\u0645\u0631\u0627\u0642\u0628"]].dropna()
+        observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
         st.success("✅ تم تحميل المراقبين بنجاح")
         st.dataframe(observers.head())
     except Exception as e:
@@ -181,4 +182,10 @@ if matches is not None and observers is not None:
     if st.button("🔄 تنفيذ التعيين"):
         try:
             result = assign_observers(matches.copy(), observers)
-            st.success("✅ تم تنفيذ
+            st.success("✅ تم تنفيذ التعيين بنجاح")
+            st.dataframe(result)
+            output = BytesIO()
+            result.to_excel(output, index=False, engine='openpyxl')
+            st.download_button("📥 تحميل الملف النهائي", data=output.getvalue(), file_name="assigned_matches.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            st.error(f"❌ خطأ أثناء تنفيذ التعيين: {e}")
