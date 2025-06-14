@@ -159,9 +159,9 @@ if observers_file:
         obs_raw = pd.read_excel(observers_file)
         obs_raw.columns = obs_raw.columns.str.strip()
         obs_raw["الاسم الكامل"] = (
-            obs_raw["First name"].fillna("") + " " +
+            obs_raw["Family name"].fillna("") + " " +
             obs_raw["2nd name"].fillna("") + " " +
-            obs_raw["Family name"].fillna("")
+            obs_raw["First name"].fillna("")
         ).str.strip()
         obs_raw["مدينة المراقب"] = obs_raw["المدينة"].astype(str).str.strip()
         observers = obs_raw[["رقم المراقب", "الاسم الكامل", "مدينة المراقب"]].dropna()
