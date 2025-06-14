@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import re
+import json
 from io import BytesIO
 
 st.set_page_config(page_title="Match Commissioners Assigner by Harashi", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
@@ -11,38 +12,80 @@ st.sidebar.title("⚙️ الإعدادات")
 allow_same_day = st.sidebar.checkbox("السماح بالتعيين بنفس اليوم (نفس الملعب فقط)", value=True)
 min_days_between = st.sidebar.number_input("عدد الأيام الدنيا بين التعيينات", value=2)
 minimize_repeats = st.sidebar.checkbox("تقليل تكرار أسماء المراقبين", value=True)
-use_distance = st.sidebar.checkbox("استخدام Google Maps لحساب المسافة", value=False)
+use_distance = st.sidebar.checkbox("استخدام OpenRouteService لحساب المسافة", value=True)
 max_distance = st.sidebar.number_input("أقصى مسافة بالكيلومترات", value=200)
-google_api_key = st.sidebar.text_input("Google Maps API Key", type="password")
+
+# ---------------------- مفتاح ORS ---------------------- #
+ORS_API_KEY = "b3b1566c3b10xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # مفتاح مؤقت قابل للتغيير
 
 # ---------------------- رفع الملفات ---------------------- #
 st.title("📄 تعيين مراقبين للمباريات")
 matches_file = st.file_uploader("📥 ملف المباريات", type=["xlsx"])
 observers_file = st.file_uploader("📥 ملف المراقبين", type=["xlsx"])
 
-# ---------------------- حساب المسافة ---------------------- #
+
+
+# ---------------------- المسافة باستخدام ORS + Cache ---------------------- #
 @st.cache_data(show_spinner=False)
+def load_city_lookup():
+    try:
+        df = pd.read_csv("cities_lookup.csv")
+        return dict(zip(df["\u0627\u0644\u0627\u0633\u0645_\u0628\u0627\u0644\u0639\u0631\u0628\u064a"], df["\u0627\u0644\u0627\u0633\u0645_\u0627\u0644\u0645\u0648\u062d\u062f"]))
+    except:
+        return {}
+
+city_lookup = load_city_lookup()
+
 def calculate_distance(city1, city2):
     if city1 == city2:
-        return 0  # نفس المدينة
-    if not (use_distance and google_api_key):
         return 0
+
+    city1_std = city_lookup.get(city1.strip(), city1.strip())
+    city2_std = city_lookup.get(city2.strip(), city2.strip())
+
     try:
-        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-        params = {
-            "origins": city1,
-            "destinations": city2,
-            "key": google_api_key,
-            "units": "metric",
-            "language": "ar",
+        with open("distance_cache.json", "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    except:
+        cache = {}
+
+    key = f"{city1_std}|{city2_std}"
+    if key in cache:
+        return cache[key]
+
+    try:
+        url = "https://api.openrouteservice.org/v2/matrix/driving-car"
+        headers = {
+            'Authorization': ORS_API_KEY,
+            'Content-Type': 'application/json'
         }
-        response = requests.get(url, params=params).json()
-        if response["status"] != "OK":
-            return 1e9
-        meters = response["rows"][0]["elements"][0].get("distance", {}).get("value", 1e9)
-        return meters / 1000
+        
+        def get_coords(city):
+            geo = requests.get(
+                f"https://api.openrouteservice.org/geocode/search?api_key={ORS_API_KEY}&text={city}&boundary.country=SA"
+            ).json()
+            coords = geo['features'][0]['geometry']['coordinates']
+            return coords
+
+        locations = [get_coords(city1_std), get_coords(city2_std)]
+
+        body = {
+            "locations": locations,
+            "metrics": ["distance"],
+            "units": "km"
+        }
+
+        response = requests.post(url, json=body, headers=headers).json()
+        dist = response["distances"][0][1]
+
+        cache[key] = dist
+        with open("distance_cache.json", "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+
+        return dist
     except:
         return 1e9
+
 
 # ---------------------- قراءة ملف المباريات ---------------------- #
 def read_matches_file(file):
