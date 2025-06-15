@@ -1,112 +1,107 @@
+# update_distance_cache.py
 
-import pandas as pd
-import requests
+import os
 import json
 import time
+import pandas as pd
+import requests
 from itertools import product
 
-ORS_API_KEY = "b3b1566c3b10xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# ---------------------- إعدادات ---------------------- #
+GOOGLE_API_KEY = "ضع_مفتاحك_هنا"  # 🔑 تأكد من تغييره بمفتاحك الصحيح
+CACHE_FILE = "distance_cache.json"
+CITY_LOOKUP_FILE = "cities_lookup.csv"
+UPLOAD_DIR = "uploaded_files"
 
-# تحميل ملفات الترجمة والمصدر
-cities_df = pd.read_csv("cities_lookup.csv")
-matches_df = pd.read_excel("matches_file.xlsx")
-observers_df = pd.read_excel("observers_file.xlsx")
+# ---------------------- تحميل ملفات ---------------------- #
+def load_city_lookup():
+    df = pd.read_csv(CITY_LOOKUP_FILE)
+    return dict(zip(df["الاسم_بالعربي"], df["الاسم_الموحد"]))
 
-# ربط الاسم العربي بالموحد (إنجليزي مقروء)
-city_lookup = dict(zip(cities_df["الاسم_بالعربي"], cities_df["الاسم_الموحد"]))
+def load_uploaded_cities():
+    cities = set()
+    for file in os.listdir(UPLOAD_DIR):
+        if file.endswith(".xlsx"):
+            df = pd.read_excel(os.path.join(UPLOAD_DIR, file))
+            if "المدينة" in df.columns:
+                cities.update(df["المدينة"].dropna().astype(str).str.strip())
+    return sorted(cities)
 
-# استخراج المدن من الملفات
-match_cities = matches_df["المدينة"].dropna().astype(str).str.strip().tolist()
-observer_cities = observers_df["المدينة"].dropna().astype(str).str.strip().tolist()
-all_cities = sorted(set(match_cities + observer_cities))
-
-# تصفية المدن غير الموجودة في الترجمة
-translated_cities = [c for c in all_cities if c in city_lookup]
-untranslated = [c for c in all_cities if c not in city_lookup]
-
-if untranslated:
-    print("⚠️ مدن لم يتم ترجمتها (أضفها لـ cities_lookup.csv):")
-    for u in untranslated:
-        print("-", u)
-
-# تحميل الكاش الحالي
-try:
-    with open("distance_cache.json", "r", encoding="utf-8") as f:
-        distance_cache = json.load(f)
-except:
-    distance_cache = {}
-
-# دالة للحصول على الإحداثيات
-def get_coords(city):
-    city_std = city_lookup.get(city, city)
-    url = "https://api.openrouteservice.org/geocode/search"
-    params = {
-        "api_key": ORS_API_KEY,
-        "text": city_std,
-        "boundary.country": "SA"
-    }
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    geo = r.json()
-    features = geo.get('features', [])
-    if not features:
-        return None
-    return features[0]['geometry']['coordinates']
-
-# إنشاء الأزواج الجديدة فقط
-new_pairs = []
-for c1, c2 in product(translated_cities, translated_cities):
-    if c1 == c2:
-        continue
-    key1 = f"{c1}|{c2}"
-    key2 = f"{c2}|{c1}"
-    if key1 not in distance_cache and key2 not in distance_cache:
-        new_pairs.append((c1, c2))
-
-print(f"🔍 عدد الأزواج الجديدة التي سيتم حسابها: {len(new_pairs)}")
-
-# حساب المسافات
-for idx, (city1, city2) in enumerate(new_pairs):
+def load_cache():
     try:
-        coords1 = get_coords(city1)
-        coords2 = get_coords(city2)
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {}
 
-        if not coords1 or not coords2:
-            raise ValueError("إحداثيات مفقودة")
+# ---------------------- دالة حساب المسافة ---------------------- #
+def google_maps_distance(city1, city2):
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    params = {
+        "origins": city1,
+        "destinations": city2,
+        "key": GOOGLE_API_KEY,
+        "units": "metric",
+        "language": "ar"
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
 
-        matrix_url = "https://api.openrouteservice.org/v2/matrix/driving-car"
-        headers = {
-            "Authorization": ORS_API_KEY,
-            "Content-Type": "application/json"
-        }
-        body = {
-            "locations": [coords1, coords2],
-            "metrics": ["distance"],
-            "units": "km"
-        }
-        r = requests.post(matrix_url, json=body, headers=headers)
-        r.raise_for_status()
-        dist_data = r.json()
-        dist = dist_data.get("distances", [[None, None]])[0][1]
+    if data.get("status") != "OK":
+        raise ValueError(f"API status error: {data.get('status')}")
 
-        if dist is None:
-            raise ValueError("المسافة غير متوفرة")
+    element = data["rows"][0]["elements"][0]
+    if element["status"] != "OK":
+        raise ValueError(f"Element status: {element['status']}")
 
-        distance_cache[f"{city1}|{city2}"] = dist
-        print(f"[{idx+1}/{len(new_pairs)}] {city1} <-> {city2} = {dist:.1f} km")
+    return element["distance"]["value"] / 1000  # بالكم
 
-        if (idx + 1) % 100 == 0:
-            with open("distance_cache.json", "w", encoding="utf-8") as f:
-                json.dump(distance_cache, f, ensure_ascii=False, indent=2)
+# ---------------------- العملية الرئيسية ---------------------- #
+if __name__ == "__main__":
+    print("🚀 جاري تحميل الملفات...")
+    lookup = load_city_lookup()
+    all_cities = load_uploaded_cities()
+    cache = load_cache()
 
-        time.sleep(1.2)
+    translated = [c for c in all_cities if c in lookup]
+    untranslated = [c for c in all_cities if c not in lookup]
 
-    except Exception as e:
-        print(f"❌ خطأ في {city1}|{city2}: {e}")
-        continue
+    if untranslated:
+        print("⚠️ مدن لم تُترجم، أضفها يدويًا إلى cities_lookup.csv:")
+        for u in untranslated:
+            print("-", u)
 
-# حفظ نهائي
-with open("distance_cache.json", "w", encoding="utf-8") as f:
-    json.dump(distance_cache, f, ensure_ascii=False, indent=2)
+    new_pairs = []
+    for c1, c2 in product(translated, translated):
+        if c1 == c2:
+            continue
+        k1 = f"{c1}|{c2}"
+        k2 = f"{c2}|{c1}"
+        if k1 not in cache and k2 not in cache:
+            new_pairs.append((c1, c2))
 
-print("\n✅ تم تحديث الكاش بالمسافات الجديدة فقط.")
+    print(f"🔍 عدد الأزواج الجديدة: {len(new_pairs)}")
+
+    for idx, (city1, city2) in enumerate(new_pairs):
+        try:
+            c1_std = lookup.get(city1, city1)
+            c2_std = lookup.get(city2, city2)
+
+            dist = google_maps_distance(c1_std, c2_std)
+            cache[f"{city1}|{city2}"] = dist
+            print(f"[{idx+1}/{len(new_pairs)}] {city1} ↔ {city2} = {dist:.1f} km")
+
+            if (idx + 1) % 50 == 0:
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(cache, f, ensure_ascii=False, indent=2)
+
+            time.sleep(1)
+
+        except Exception as e:
+            print(f"❌ خطأ في {city1}|{city2}: {e}")
+            continue
+
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+    print("\n✅ تم تحديث كاش Google Maps للمسافات.")
